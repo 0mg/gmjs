@@ -29,25 +29,29 @@
   };
 
 
+  // Modern JS Functions
+
+  var JSON;
+  JSON = JSON || {
+    parse: function(s) {
+      try {
+        return eval("(" + s + ")");
+      } catch(e) {
+        return e;
+      }
+    }
+  };
+
+
   // UserJS Debug Functions
 
-  // Show Props
-  var props = function(o) {
-    if (!o) return;
-    var s = [];
-    for (var p in o) {
-      s.push(p + " : " + o[p]);
-    }
-    return s.sort().join("\n");
-  };
-  // API limit
-  window.addEventListener("dblclick", function(event) {
-    if (event.target === document.documentElement) {
-      X.get(U.APV + "account/rate_limit_status.json", function(xhr) {
-        alert(xhr.responseText);
-      });
-    }
-  }, false);
+  var props = function(arg) {
+    if (arg === null || typeof arg === "undefined") return arg;
+    var proplist = [];
+    for (var i in arg) proplist.push(i + " : " + arg[i]);
+    proplist.sort().unshift(arg);
+    return proplist.join("\n");
+  }
 
 
   // DOM Functions
@@ -63,9 +67,52 @@
       this.setAttribute(attr, value);
       return this;
     }
+    function optimizeClass() {
+      var classList = this.className.replace(/\s+/g, " ").replace(/^ | $/g, "").
+                      split(" ");
+      var optedClass = [];
+      out: for (var i = 0, l = classList.length; i < l; ++i) {
+        for (var j = i + 1; j < l; ++j) {
+          if (classList[i] === classList[j]) continue out;
+        }
+        optedClass.push(classList[i]);
+      }
+      this.className = optedClass.join(" ");
+      return this;
+    }
+    function hasClass(str) {
+      optimizeClass.call(this);
+      return (" " + this.className + " ").indexOf(" " + str + " ") >= 0;
+    }
+    function removeClass(str) {
+      optimizeClass.call(this);
+      var classList = this.className.split(" ");
+      for (var i = 0; i < classList.length; ++i) {
+        if (str === classList[i]) {
+          classList.splice(i, 1);
+          --i;
+        }
+      }
+      this.className = classList.join(" ");
+      return this;
+    }
+    function addClass(str) {
+      if (!hasClass.call(this, str)) this.className += " " + str;
+      return this;
+    }
+    function replaceClass(newStr, currentStr) {
+      removeClass.call(this, currentStr);
+      addClass.call(this, newStr);
+      return this;
+    }
     function x(e) { // extend element
       e.add = appendChildren;
       e.sa = setAttribute;
+      e.optC = optimizeClass;
+      e.hasC = hasClass;
+      e.rmC = removeClass;
+      e.addC = addClass;
+      e.repC = replaceClass;
       return e;
     }
     return {
@@ -80,31 +127,68 @@
       del: function(e) { return e.parentNode.removeChild(e); }
     };
   };
+
+
+  // Object Functions
+
+  var O = {
+    stringify: function(arg) {
+      if (arg === null || typeof arg !== "object") return arg;
+      var proplist = [];
+      for (var i in arg) proplist.push(i + " : " + arg[i]);
+      return proplist.join("\n");
+    },
+    htmlify: function(arg) {
+      if (arg === null || typeof arg !== "object") {
+        return D.ce("p").add(D.ct(arg));
+      }
+      var list = D.ce("dl");
+      for (var i in arg) {
+        list.add(D.ce("dt").add(D.ct(i))).add(D.ce("dd").add(D.ct(arg[i])));
+      }
+      return list.hasChildNodes() ? list : D.ce("p").add(D.ct("Empty Object"));
+    }
+  };
+
+
   // eg. 'http://t.co' to '<a href="http://t.co">http://t.co</a>'
-  D.tweetize = function(innerText) {
+  D.tweetize = function(innerText, entities) {
     var fragment = D.cf();
     if (!innerText) { // "", null, false, undefined.,
       fragment.add(D.ct(""));
       return fragment;
     }
 
+    var entities_urls = entities && entities.urls || [];
     var xssText = T.decodeHTML(innerText);
     var re = {
-      url: /(^(?:https?:\/\/|javascript:|data:|opera:)\S+)/,
-      mention: /(^@\w+(?:\/[-\w]+)?)/,
-      hashTag: /(^#\w+)/,
+      httpurl: /(^https?:\/\/[-\w.!~*'()%@:$,;&=+/?#\[\]]+)/,
+      url: /(^(?:javascript|data|about|opera):\S+)/,
+      mention: /(^@\w+(?:\/[a-zA-Z](?:-?[a-zA-Z0-9])*)?)/,
+      hashTag: /(^#\w*[a-zA-Z_]\w*)/,
       crlf: /(^\r\n|^\r|^\n)/
     };
 
     var context = xssText;
     for (var str = ""; context = context.slice(str.length);) {
-      if (re.url.test(context)) { // http://URL/
+      if (re.httpurl.test(context) || re.url.test(context)) { // URL
         str = RegExp.$1;
         var url = str;
         var a = D.ce("a");
+        a.className = "maybe_shorten_url";
         a.href = url;
         a.add(D.ct(url));
         fragment.add(a);
+        for (var i = 0, l = entities_urls.length; i < l; ++i) {
+          if (url === entities_urls[i].url &&
+              entities_urls[i].expanded_url) {
+            var expanded_url = entities_urls[i].expanded_url;
+            a.className += " expanded_tco_url";
+            a.href = expanded_url;
+            a.textContent = expanded_url;
+            break;
+          }
+        }
 
       } else if (re.mention.test(context)) { // @mention
         str = RegExp.$1;
@@ -134,14 +218,6 @@
     }
     fragment.normalize();
     return fragment;
-  };
-
-
-  // JSON Functions
-
-  var JSON;
-  JSON = JSON || {
-    parse: function(s) { return eval("(" + s + ")"); }
   };
 
 
@@ -214,6 +290,7 @@
   var T = {
     // eg. '&lt;' to '<'
     decodeHTML: function(innerText) {
+      innerText = innerText || "";
       function dentity(entity) {
         var html_entities = {
           nbsp: 160, iexcl: 161, cent: 162, pound: 163,
@@ -329,28 +406,37 @@
 
 
   // Scripts after render page
-  var after = {
+  var A = {
     expandUrls: function(parent) {
       var links = (parent || document).getElementsByTagName("a");
       var elements = [], urls = [];
 
       for (var i = 0; i < links.length; ++i) {
         var a = links[i];
-        if (a.hasChildNodes() && (a.href === a.textContent)) {
+        if (a.hasC("maybe_shorten_url")) {
           elements.push(a), urls.push(a.href);
         }
       }
 
       urls.length && API.resolveURL(urls, function(xhr) {
         var data = JSON.parse(xhr.responseText);
+        for (var raw_url in data) {
+          var exp_url = data[raw_url];
+          if (raw_url.indexOf("#") >= 0 ||
+              raw_url.indexOf("?") >= 0) {
+            data[raw_url] = null;
+          } else if (exp_url) {
+            data[raw_url] = data[raw_url].replace(/\/(?=$|\?)/, "");
+          }
+        }
 
         for (var i = 0; i < urls.length; ++i) {
           var raw_url = urls[i];
           var exp_url = data[raw_url];
           if (exp_url) {
             var a = elements[i];
-            a.className += " expanded_url";
-            a.textContent = decodeURIComponent(escape(exp_url));
+            a.repC("expanded_url", "maybe_shorten_url");
+            a.href = a.textContent = decodeURIComponent(escape(exp_url));
           }
         }
       });
@@ -595,7 +681,7 @@
       meta.sa("charset", "utf-8");
       title.add(D.ct("tw-"));
       style.add(D.ct('\
-        * {\
+        *:not(button) {\
           margin: 0;\
           padding: 0;\
         }\
@@ -612,8 +698,7 @@
           font-size: 14px;\
         }\
         button {\
-          line-height: 1;\
-          padding: 0.4ex;\
+          line-height: 1.3;\
         }\
         dl {\
           padding: 2ex;\
@@ -635,8 +720,18 @@
           border-bottom: 1px solid transparent;\
         }\
         #subaction {\
+          line-height: 1;\
           color: ButtonText;\
-          background: ButtonFace;\
+          background-color: ButtonFace;\
+        }\
+        #subaction a {\
+          display: inline-block;\
+          margin-left: 1ex;\
+        }\
+        #subaction a,\
+        .user,\
+        .tweet {\
+          background-color: #fdfdfd;\
         }\
         #content {\
           display: table-cell;\
@@ -657,10 +752,15 @@
           height: 7em;\
           max-width: 100%;\
           max-height: 100%;\
+          font-size: inherit;\
         }\
         #timeline {\
         }\
         #cursor {\
+        }\
+        a.maybe_shorten_url {\
+        }\
+        a.expanded_tco_url {\
         }\
         a.expanded_url {\
         }\
@@ -671,7 +771,6 @@
           min-height: 48px;\
           padding: 1ex 1ex 1ex 60px;\
           border-bottom: 1px solid silver;\
-          background: #fdfdfd;\
         }\
         .user-profile.protected .name::after,\
         .user.protected .name::after,\
@@ -699,10 +798,14 @@
           margin-left: 1ex;\
         }\
         .user .name,\
+        .user .name *,\
         .user .meta,\
+        .user .meta *,\
         .tweet .name,\
-        .tweet .meta {\
-          color: #999;\
+        .tweet .name *,\
+        .tweet .meta,\
+        .tweet .meta * {\
+          color: #999 !important;\
         }\
         .user .meta,\
         .tweet .meta {\
@@ -742,15 +845,11 @@
         .tweet-action {\
           font-size: smaller;\
         }\
-        .tweet-action > * {\
-          display: inline-block;\
-          margin-right: 1ex;\
-        }\
         .tweet-action button.true::before,\
         .user-action button.true::before {\
           content: "\u2714";\
         }\
-      '.replace(/ +/g, " ")));
+      '.replace(/\s+/g, " ")));
 
       document.appendChild(html.add(head.add(meta, title, style), body));
     },
@@ -791,235 +890,212 @@
   };
 
 
-  // Functions step to Render main content
-  var pre = {
+  // Functions of Render main content
 
-    // Switch content by path in URL
-    startPage: function(my) {
+  var content = {
+    // Show Content by path in URL
+    showPage: function(my) {
       var curl = U.getURL();
       var path = curl.path;
       var hash = path.split("/");
       var q = curl.query;
+
       D.tag("title").textContent = "tw-/" + path;
       outline.showSubTitle(hash);
       panel.showGlobalBar(my);
       panel.showTweetBox();
+
       switch (hash.length) {
-        case (1): {
-          switch (hash[0]) {
-            case ("retweeted_by_me"): {
-              content.showTL(U.APV + "statuses/retweeted_by_me.json?" + q +
-                             "&include_entities=true", my);
-              break;
-            }
-            case ("retweeted_to_me"): {
-              content.showTL(U.APV + "statuses/retweeted_to_me.json?" + q +
-                             "&include_entities=true", my);
-              break;
-            }
-            case ("retweets_of_me"): {
-              content.showTL(U.APV + "statuses/retweets_of_me.json?" + q +
-                             "&include_entities=true", my);
-              break;
-            }
-            case ("search"): {
-              location = "http://search.twitter.com/search?" + q;
-              break;
-            }
-            case ("lists"): {
-              content.showLists(U.APV + "lists.json?" + q + "&cursor=-1", my);
-              panel.showListPanel(my);
-              break;
-            }
-            case ("inbox"): {
-              content.showTL(U.APV + "direct_messages.json?" + q +
-                             "&include_entities=true&cursor=-1", my);
-              break;
-            }
-            case ("sent"): {
-              content.showTL(U.APV + "direct_messages/sent.json?" + q +
-                             "&include_entities=true&cursor=-1", my);
-              break;
-            }
-            case ("favorites"): {
-              content.showTL(U.APV + "favorites.json?" + q +
-                             "&include_entities=true&cursor=-1", my);
-              break;
-            }
-            case ("following"): {
-              content.showUsers(U.APV + "statuses/friends.json?" + q +
-                                "&count=20&cursor=-1", my);
-              break;
-            }
-            case ("followers"): {
-              content.showUsers(U.APV + "statuses/followers.json?" + q +
-                                "&count=20&cursor=-1", my);
-              break;
-            }
-            case ("mentions"): {
-              content.showTL(U.APV + "statuses/mentions.json?" + q +
-                             "&include_entities=true", my);
-              break;
-            }
-            case ("blocking"): {
-              content.showUsers(U.APV + "blocks/blocking.json?" + q, my);
-              break;
-            }
-            case (""): {
-              content.showTL(U.APV + "statuses/home_timeline.json?" + q +
-                             "&include_entities=true", my);
-              break;
-            }
-            default: {
-              content.showTL(U.APV + "statuses/user_timeline.json?" + q +
-                             "&include_entities=true&include_rts=true" +
-                             "&screen_name=" + hash[0], my);
-              outline.showProfileOutline(hash[0], my);
-              break;
-            }
+      case 1:
+        on1.call(this, hash, q, my);
+        break;
+      case 2:
+        on2.call(this, hash, q, my);
+        break;
+      case 3:
+        on3.call(this, hash, q, my);
+        break;
+      }
+
+      function on1(hash, q, my) {
+        switch (hash[0]) {
+        case "public_timeline":
+          this.showTL(U.APV + "statuses/public_timeline.json?" + q +
+                      "&include_entities=true", my);
+          break;
+        case "retweets":
+          this.showTL(U.APV + "statuses/retweeted_by_me.json?" + q +
+                      "&include_entities=true", my);
+          break;
+        case "retweets_by_others":
+          this.showTL(U.APV + "statuses/retweeted_to_me.json?" + q +
+                      "&include_entities=true", my);
+          break;
+        case "retweeted_of_mine":
+          this.showTL(U.APV + "statuses/retweets_of_me.json?" + q +
+                      "&include_entities=true", my);
+          break;
+        case "search":
+          location.replace("http://search.twitter.com/search?" + q);
+          break;
+        case "lists":
+          this.showLists(U.APV + "lists.json?" + q + "&cursor=-1", my);
+          panel.showListPanel(my);
+          break;
+        case "inbox":
+          this.showTL(U.APV + "direct_messages.json?" + q +
+                      "&include_entities=true", my);
+          break;
+        case "sent":
+          this.showTL(U.APV + "direct_messages/sent.json?" + q +
+                      "&include_entities=true", my);
+          break;
+        case "favorites":
+          this.showTL(U.APV + "favorites.json?" + q +
+                      "&include_entities=true", my);
+          break;
+        case "following":
+          this.showUsers(U.APV + "statuses/friends.json?" + q +
+                         "&count=20&cursor=-1", my);
+          break;
+        case "followers":
+          this.showUsers(U.APV + "statuses/followers.json?" + q +
+                         "&count=20&cursor=-1", my);
+          break;
+        case "mentions":
+          this.showTL(U.APV + "statuses/mentions.json?" + q +
+                      "&include_entities=true", my);
+          break;
+        case "blocking":
+          this.showUsers(U.APV + "blocks/blocking.json?" + q, my);
+          break;
+        case "":
+          this.showTL(U.APV + "statuses/home_timeline.json?" + q +
+                      "&include_entities=true", my);
+          break;
+        default:
+          this.showTL(U.APV + "statuses/user_timeline.json?" + q +
+                      "&include_entities=true&include_rts=true" +
+                      "&screen_name=" + hash[0], my);
+          outline.showProfileOutline(hash[0], my);
+        }
+      }
+
+      function on2(hash, q, my) {
+        switch (hash[1]) {
+        case "requests":
+          if (hash[0] === "following") {
+            this.showUsersByIds(U.APV + "friendships/outgoing.json?" + q +
+                                "&cursor=-1", my);
+          } else if (hash[0] === "followers") {
+            this.showUsersByIds(U.APV + "friendships/incoming.json?" + q +
+                                "&cursor=-1", my, 1);
           }
           break;
-        }
-        case (2): {
-          switch (hash[1]) {
-            case ("requests"): {
-              if (hash[0] === "following") {
-                content.showUsersByIds(U.APV + "friendships/outgoing.json?" +
-                                       q + "&cursor=-1", my);
-              } else if (hash[0] === "followers") {
-                content.showUsersByIds(U.APV + "friendships/incoming.json?" +
-                                       q + "&cursor=-1", my, 1);
-              }
-              break;
-            }
-            case ("design"): {
-              if (hash[0] === "settings") {
-                content.customizeDesign(my);
-              }
-              break;
-            }
-            case ("memberships"): {
-              if (hash[0] === "lists") {
-                content.showLists(U.APV + "lists/memberships.json?" + q, my);
-              }
-              break;
-            }
-            case ("subscriptions"): {
-              if (hash[0] === "lists") {
-                content.showLists(U.APV + "lists/subscriptions.json?" + q, my);
-                panel.showUserManager(my);
-              }
-              break;
-            }
-            case ("status"):
-            case ("statuses"): {
-              content.showTL(U.APV + "statuses/user_timeline.json?" + q +
-                             "&include_entities=true&include_rts=true" +
-                             "&screen_name=" + hash[0], my);
-              break;
-            }
-            case ("favorites"): {
-              // formal: fovorites/(screen_name||ID).json
-              // http://dev.twitter.com/doc/get/favorites
-              content.showTL(U.APV + "favorites.json?" + q +
-                             "&include_entities=true" +
-                             "&screen_name=" + hash[0] +
-                             "&cursor=-1", my);
-              outline.showProfileOutline(hash[0], my, 3);
-              break;
-            }
-            case ("following"): {
-              content.showUsers(U.APV + "statuses/friends.json?" + q +
-                                "&screen_name=" + hash[0] +
-                                "&count=20&cursor=-1", my);
-              outline.showProfileOutline(hash[0], my, 3);
-              break;
-            }
-            case ("followers"): {
-              content.showUsers(U.APV + "statuses/followers.json?" + q +
-                                "&screen_name=" + hash[0] +
-                                "&count=20&cursor=-1", my);
-              outline.showProfileOutline(hash[0], my, 3);
-              break;
-            }
-            case ("lists"): {
-              content.showLists(U.APV + "lists.json?" + q +
-                                "&screen_name=" + hash[0], my);
-              outline.showProfileOutline(hash[0], my, 3);
-              break;
-            }
-            default: {
-              var url = U.APV + "lists/statuses.json?" + q +
-                        "&owner_screen_name=" + hash[0] +
-                        "&slug=" + hash[1] +
-                        "&include_entities=true";
-              content.showTL(url, my);
-              outline.showListOutline(hash, my);
-              break;
-            }
+        case "design":
+          if (hash[0] === "settings") this.customizeDesign(my);
+          break;
+        case "memberships":
+          if (hash[0] === "lists") {
+            this.showLists(U.APV + "lists/memberships.json?" + q, my);
           }
           break;
-        }
-        case (3): {
-          switch (hash[2]) {
-            case ("timeline"): {
-              if (hash[1] === "following") {
-                content.showTL(U.APV + "statuses/following_timeline.json?" + q +
-                               "&include_entities=true" +
-                               "&screen_name=" + hash[0], my);
-                outline.showProfileOutline(hash[0], my, 3);
-              }
-              break;
-            }
-            case ("members"): {
-              content.showUsers(U.APV + "lists/members.json?" + q +
-                                "&owner_screen_name=" + hash[0] +
-                                "&slug=" + hash[1], my);
-              outline.showListOutline(hash, my, 3);
-              break;
-            }
-            case ("subscribers"): {
-              content.showUsers(U.APV + "lists/subscribers.json?" + q +
-                                "&owner_screen_name=" + hash[0] +
-                                "&slug=" + hash[1], my);
-              outline.showListOutline(hash, my, 3);
-              break;
-            }
-            case ("memberships"): {
-              if (hash[1] === "lists") {
-                content.showLists(U.APV + "lists/memberships.json?" + q +
-                                  "&screen_name=" + hash[0], my);
-                outline.showProfileOutline(hash[0], my, 3);
-              }
-              break;
-            }
-            case ("subscriptions"): {
-              if (hash[1] === "lists") {
-                content.showLists(U.APV + "lists/subscriptions.json?" + q +
-                                  "&screen_name=" + hash[0], my);
-                outline.showProfileOutline(hash[0], my, 3);
-              }
-              break;
-            }
-            default: {
-              if (hash[1] === "status" || hash[1] === "statuses") {
-                content.showTL(U.APV + "statuses/show/" + hash[2] + ".json?" +
-                               q, my);
-                outline.showProfileOutline(hash[0], my, 1);
-              }
-              break;
-            }
-          } // switch(hash[2])
+        case "subscriptions":
+          if (hash[0] === "lists") {
+            this.showLists(U.APV + "lists/subscriptions.json?" + q, my);
+            panel.showUserManager(my);
+          }
           break;
-        } // case(3)
-      } // switch(hash.length)
-    } // function
-  };
+        case "status":
+        case "statuses":
+          this.showTL(U.APV + "statuses/user_timeline.json?" + q +
+                      "&include_entities=true&include_rts=true" +
+                      "&screen_name=" + hash[0], my);
+          break;
+        case "favorites":
+          // formal: fovorites/(screen_name||ID).json
+          // http://dev.twitter.com/doc/get/favorites
+          this.showTL(U.APV + "favorites.json?" + q +
+                      "&include_entities=true" +
+                      "&screen_name=" + hash[0], my);
+          outline.showProfileOutline(hash[0], my, 3);
+          break;
+        case "following":
+          this.showUsers(U.APV + "statuses/friends.json?" + q +
+                         "&screen_name=" + hash[0] +
+                         "&count=20&cursor=-1", my);
+          outline.showProfileOutline(hash[0], my, 3);
+          break;
+        case "followers":
+          this.showUsers(U.APV + "statuses/followers.json?" + q +
+                         "&screen_name=" + hash[0] +
+                         "&count=20&cursor=-1", my);
+          outline.showProfileOutline(hash[0], my, 3);
+          break;
+        case "lists":
+          this.showLists(U.APV + "lists.json?" + q +
+                         "&screen_name=" + hash[0], my);
+          outline.showProfileOutline(hash[0], my, 3);
+          break;
+        default:
+          if (hash[0] === "status" || hash[0] === "statuses") {
+            this.showTL(U.APV + "statuses/show/" + hash[1] + ".json?" + q, my);
+          } else {
+            var url = U.APV + "lists/statuses.json?" + q +
+                      "&owner_screen_name=" + hash[0] +
+                      "&slug=" + hash[1] +
+                      "&include_entities=true";
+            this.showTL(url, my);
+            outline.showListOutline(hash, my);
+          }
+        }
+      }
 
+      function on3(hash) {
+        switch (hash[2]) {
+        case "timeline":
+          if (hash[1] === "following") {
+            this.showTL(U.APV + "statuses/following_timeline.json?" + q +
+                        "&include_entities=true" +
+                        "&screen_name=" + hash[0], my);
+            outline.showProfileOutline(hash[0], my, 3);
+          }
+          break;
+        case "members":
+          this.showUsers(U.APV + "lists/members.json?" + q +
+                         "&owner_screen_name=" + hash[0] +
+                         "&slug=" + hash[1], my);
+          outline.showListOutline(hash, my, 3);
+          break;
+        case "subscribers":
+          this.showUsers(U.APV + "lists/subscribers.json?" + q +
+                         "&owner_screen_name=" + hash[0] +
+                         "&slug=" + hash[1], my);
+          outline.showListOutline(hash, my, 3);
+          break;
+        case "memberships":
+          if (hash[1] === "lists") {
+            this.showLists(U.APV + "lists/memberships.json?" + q +
+                           "&screen_name=" + hash[0], my);
+            outline.showProfileOutline(hash[0], my, 3);
+          }
+          break;
+        case "subscriptions":
+          if (hash[1] === "lists") {
+            this.showLists(U.APV + "lists/subscriptions.json?" + q +
+                           "&screen_name=" + hash[0], my);
+            outline.showProfileOutline(hash[0], my, 3);
+          }
+          break;
+        default:
+          if (hash[1] === "status" || hash[1] === "statuses") {
+            this.showTL(U.APV + "statuses/show/" + hash[2] + ".json?" + q, my);
+            outline.showProfileOutline(hash[0], my, 1);
+          }
+        }
+      }
+    },
 
-  // Functions of Render main content
-
-  var content = {
     // Render View of Colors Setting
     // Change colors of text, link, background-color.,
     customizeDesign: function(my) {
@@ -1052,30 +1128,25 @@
         var input = event.target;
         if (input.value.length !== 6 || isNaN("0x" + input.value)) return;
         switch (input) {
-          case (fm.bg.color): {
-            background.style.backgroundColor = "#" + input.value;
-            break;
-          }
-          case (fm.textColor): {
-            document.body.style.color = "#" + input.value;
-            break;
-          }
-          case (fm.linkColor): {
-            Array.prototype.forEach.call(D.tags("a"), function(a) {
-              a.style.color = "#" + input.value;
-            });
-            break;
-          }
-          case (fm.sidebar.fillColor): {
-            D.id("subtitle").style.backgroundColor =
-            D.id("side").style.backgroundColor = "#" + input.value;
-            break;
-          }
-          case (fm.sidebar.borderColor): {
-            D.id("subtitle").style.borderColor =
-            D.id("side").style.borderColor = input.value;
-            break;
-          }
+        case fm.bg.color:
+          background.style.backgroundColor = "#" + input.value;
+          break;
+        case fm.textColor:
+          document.body.style.color = "#" + input.value;
+          break;
+        case fm.linkColor:
+          Array.prototype.forEach.call(D.tags("a"), function(a) {
+            a.style.color = "#" + input.value;
+          });
+          break;
+        case fm.sidebar.fillColor:
+          D.id("subtitle").style.backgroundColor =
+          D.id("side").style.backgroundColor = "#" + input.value;
+          break;
+        case fm.sidebar.borderColor:
+          D.id("subtitle").style.borderColor =
+          D.id("side").style.borderColor = input.value;
+          break;
         }
       }, true);
 
@@ -1178,6 +1249,8 @@
         var ids = ids_data.ids.join(",");
         if (ids.length) {
           X.get(U.APV + "users/lookup.json?user_id=" + ids, onGetUsers);
+        } else {
+          D.id("main").add(O.htmlify({"Empty": "No users found"}));
         }
       }
       X.get(url, onGetIds);
@@ -1195,7 +1268,7 @@
       users_list.id = "users";
 
       data.users && data.users.forEach(function(user) {
-        var lu= {
+        var lu = {
           root: D.ce("li"),
           screen_name: D.ce("a"),
           icon: D.ce("img"),
@@ -1216,7 +1289,7 @@
         lu.icon.src = user.profile_image_url;
 
         lu.name.className = "name";
-        lu.name.add(D.tweetize(user.name));
+        lu.name.add(D.ct(T.decodeHTML(user.name)));
 
         lu.description.className = "description";
         lu.description.add(D.tweetize(user.description));
@@ -1244,7 +1317,9 @@
         users_list.add(lu.root);
       });
 
-      D.id("main").add(users_list);
+      D.id("main").add(users_list.hasChildNodes() ?
+                       users_list : D.ct("No users found"));
+
       that.misc.showCursor(data);
     },
 
@@ -1262,6 +1337,7 @@
 
     // Render View of list of lists
     showLists: function(url, my) {
+      var that = this;
       X.get(url, function(xhr) {
         var data = JSON.parse(xhr.responseText);
 
@@ -1279,7 +1355,7 @@
         });
 
         D.id("main").add(lists);
-        content.misc.showCursor(data);
+        that.misc.showCursor(data);
       });
     },
 
@@ -1290,11 +1366,17 @@
       function onGetTLData(xhr) {
         var timeline = JSON.parse(xhr.responseText);
         that.rendTL(timeline, my);
-        after.expandUrls(D.id("timeline"));
+        A.expandUrls(D.id("timeline"));
       }
 
       function onError(xhr) {
-        D.id("main").add(D.ct(xhr.responseText || "No data"));
+        var data;
+        if (xhr.responseText === "") { // protected user timeline
+          data = {"Empty": "No tweets found"};
+        } else {
+          data = JSON.parse(xhr.responseText);
+        }
+        D.id("main").add(O.htmlify(data));
       }
 
       X.get(url, onGetTLData, onError);
@@ -1309,6 +1391,7 @@
 
       timeline.forEach(function(tweet) {
         var tweet_org = tweet;
+
         var isDM = "sender" in tweet && "recipient" in tweet;
         var isRT = "retweeted_status" in tweet;
 
@@ -1324,14 +1407,15 @@
           text: D.ce("p"),
           meta: D.ce("div"),
           date: D.ce("a"),
-          src: D.ce("span")
+          src: null,
+          geo: null,
+          retweeter: null
         };
 
-        ent.ry.className = "tweet";
-        ent.ry.className += " screen_name-" + tweet.user.screen_name;
+        ent.ry.className = "tweet screen_name-" + tweet.user.screen_name;
         if (tweet.user["protected"]) ent.ry.className += " protected";
         if (isRT) ent.ry.className += " retweet";
-        if (/[RQ]T:? *@\w+:?/.test(tweet.text)) {
+        if (/[RQ]T:?\s*@\w+/.test(tweet.text)) {
           ent.ry.className += " quote";
         }
 
@@ -1340,50 +1424,65 @@
         ent.name.add(D.ct(tweet.user.screen_name));
 
         ent.nick.className = "name";
-        ent.nick.add(D.tweetize(tweet.user.name));
+        ent.nick.add(D.ct(T.decodeHTML(tweet.user.name)));
 
         ent.icon.className = "user-icon";
         ent.icon.alt = tweet.user.screen_name;
         ent.icon.src = tweet.user.profile_image_url;
 
         ent.reid.className = "in_reply_to";
-        if (tweet.in_reply_to_status_id) {
+        if (isDM) {
+          ent.reid.href = U.ROOT + tweet.recipient_screen_name;
+          ent.reid.add(D.ct("d " + tweet.recipient_screen_name));
+        } else if (tweet.in_reply_to_status_id) {
           ent.reid.href = U.ROOT + tweet.in_reply_to_screen_name + "/status/" +
                           tweet.in_reply_to_status_id_str;
           ent.reid.add(D.ct("in reply to " + tweet.in_reply_to_screen_name));
         }
-        if (isDM) {
-          ent.reid.href = U.ROOT + tweet.recipient_screen_name;
-          ent.reid.add(D.ct("d " + tweet.recipient_screen_name));
-        }
 
         ent.text.className = "text";
-        ent.text.add(D.tweetize(tweet.text));
+        ent.text.add(D.tweetize(tweet.text, tweet.entities));
 
         ent.meta.className = "meta";
 
         ent.date.className = "created_at";
         var dmhref = U.ROOT + U.getURL().path +
                      U.Q + "count=1&max_id=" + tweet.id_str;
-        var tweethref = "http://m.twitter.com/statuses/" + tweet.id_str;
+        var tweethref = "http://mobile.twitter.com/statuses/" + tweet.id_str;
         ent.date.href = isDM ? dmhref : tweethref;
         ent.date.add(D.ct(T.gapTime(new Date, new Date(tweet.created_at))));
 
-        var sandbox = D.ce("p");
-        sandbox.innerHTML = tweet.source;
-        if (sandbox.childNodes.length === 1 &&
-            sandbox.lastChild.nodeName.toUpperCase() === "A" &&
-            sandbox.lastChild.childNodes.length === 1 &&
-            sandbox.lastChild.lastChild.nodeType === 3) {
-          ent.src = D.ce("a").sa("href", sandbox.lastChild.href).
-                    add(sandbox.lastChild.lastChild);
-        } else {
-          ent.src.add(D.ct(tweet.source));
+        if (!isDM) {
+          if (/<a href="([^"]*)"[^>]*>([^<]*)<\/a>/.test(tweet.source)) {
+            var aHref = RegExp.$1;
+            var aText = T.decodeHTML(RegExp.$2);
+            ent.src = D.ce("a").sa("href", aHref).add(D.ct(aText));
+          } else {
+            ent.src = D.ce("span").add(D.ct(T.decodeHTML(tweet.source)));
+          }
+          ent.src.className = "source";
         }
-        ent.src.className = "source";
 
         ent.meta.add(ent.date);
         if (!isDM) ent.meta.add(D.ct(" via "), ent.src);
+        if (tweet.place && tweet.place.name && tweet.place.country) {
+          ent.geo = D.ce("a");
+          ent.geo.add(D.ct(tweet.place.name));
+          if (tweet.geo && tweet.geo.coordinates) {
+            ent.geo.href = "http://map.google.com/?q=" + tweet.geo.coordinates;
+          } else {
+            ent.geo.href = "http://map.google.com/?q=" + tweet.place.full_name;
+          }
+          ent.meta.add(D.ct(" from "), ent.geo);
+        }
+        if (isRT) {
+          ent.retweeter = D.ce("a");
+          ent.retweeter.href = "http://mobile.twitter.com/statuses/" +
+                               tweet_org.id_str;
+          ent.retweeter.add(D.ct(tweet_org.user.screen_name));
+          ent.meta.add(D.ct(" by "), ent.retweeter);
+        }
+        ent.meta.normalize();
 
         ent.ry.add(
           ent.name,
@@ -1414,7 +1513,7 @@
         D.tag("head").add(
           D.ce("link").sa("rel", "next").sa("href", past.href)
         );
-      }
+      } else tl_element.add(O.htmlify({"Empty": "No tweets found"}));
     },
 
     misc: {
@@ -1461,14 +1560,14 @@
         this.name = name;
         this.labelDefault = labelDefault;
         this.labelOn = labelOn;
-        this.node = D.ce("button").add(D.ct(labelDefault));
+        this.node = D.ce("button").add(D.ct(labelDefault)).addC(name);
       };
       Button.prototype = {
         on: false,
         turn: function(flag) {
           flag = !!flag;
           this.on = flag;
-          this.node.className = this.name + " " + flag;
+          this.node.repC(String(flag), String(!flag));
           this.node.textContent = flag ? this.labelOn : this.labelDefault;
           return this;
         },
@@ -1523,13 +1622,17 @@
 
     // Action buttons panel for fav, reply, retweet
     makeTwAct: function(t, my) {
+      var rt = t.retweeted_status;
+
       var isDM = "sender" in t;
-      var isRT = "retweeted_status" in t;
+      var isRT = !!rt;
+
+      var isMyTweet = !isDM && !isRT && t.user.id_str === my.id_str;
       var isMyRT = isRT && t.user.id_str === my.id_str;
-      var isRTtoMe = isRT &&
-                     t.retweeted_status.user.screen_name === my.screen_name;
-      var isRTRTedByMe = isRT && false;
+
+      var isRTtoMe = isRT && rt.user.id_str === my.id_str;
       var isTweetRTedByMe = "current_user_retweet" in t;
+      var isRTRTedByMeToo = isRT && isTweetRTedByMe && false;
 
       if (isDM) t.user = t.sender;
 
@@ -1537,83 +1640,77 @@
       var ab = {
         node: D.ce("div").sa("class", "tweet-action"),
         fav: new Button("fav", "Fav", "Unfav"),
-        rep: {node: D.ce("a")},
+        rep: D.ce("button"),
         del: new Button("delete", "Delete", "Delete"),
         rt: new Button("retweet", "RT", "UnRT")
       };
 
-//ab.node.add(D.ct((isRT ? "This Tweet is a RT by " + t.user.screen_name : "This is a Tweet")+". "));ab.node.add(D.ct(""+(isMyRT ? " So, This RT is by YOU" : isRTtoMe ? "It's RT to YOU" : isTweetRTedByMe ? "You are RTing this Tweet" : isRTRTedByMe ? "You are also RTing this too." :  "")));
+//ab.node.add(D.ct((isRT ? "This is a RT by " + t.user.screen_name : "This is a Tweet")+". "));ab.node.add(D.ct(""+(isMyRT ? "So, by you." : isRTtoMe ? "It's RT to YOU" : isTweetRTedByMe ? "You RTed it." : isRTRTedByMeToo ? "You RTed it too." :  "")));
 
-      t.favorited && onFav();
+      (rt || t).favorited && onFav();
 
       function onFav() { ab.fav.turn(true); }
       function onUnfav() { ab.fav.turn(false); }
 
       ab.fav.node.addEventListener("click", function() {
-        ab.fav.on ? API.unfav(t.id_str, onUnfav) : API.fav(t.id_str, onFav);
+        ab.fav.on ? API.unfav((rt || t).id_str, onUnfav) :
+                    API.fav((rt || t).id_str, onFav);
       }, false);
 
       if (!isDM) ab.node.add(ab.fav.node);
 
-      ab.rep.node.className = "reply";
-      ab.rep.node.href = "javascript:void'Reply'";
-      ab.rep.node.add(D.ct("Reply"));
+      ab.rep.className = "reply";
+      ab.rep.title = (rt || t).id_str;
+      ab.rep.add(D.ct("Reply"));
 
       if (isDM) {
-        ab.rep.node.addEventListener("click", function() {
+        ab.rep.addEventListener("click", function() {
           var status = D.id("status");
           status.value = "d " + t.user.screen_name + " " + status.value;
           status.focus();
         }, false)
       } else {
-        ab.rep.node.addEventListener("click", function() {
+        ab.rep.addEventListener("click", function() {
           var status = D.id("status");
           var repid = D.id("in_reply_to_status_id");
 
-          status.value = "@" + t.user.screen_name + " " + status.value;
-          repid.value = t.id_str;
+          status.value = "@" + (rt || t).user.screen_name + " " + status.value;
+          repid.value = (rt || t).id_str;
 
           status.focus();
         }, false);
       }
 
-      ab.node.add(ab.rep.node);
+      ab.node.add(ab.rep);
 
       (isMyRT || isTweetRTedByMe) && onRT();
 
       function onRT() { ab.rt.turn(true); }
       function onUnRT() { ab.rt.turn(false); }
 
-      ab.rt.isMyRT = isMyRT;
-      ab.rt.isTweetRTedByMe = isTweetRTedByMe;
       ab.rt.node.addEventListener("click", function() {
-        if (ab.rt.isMyRT) {
-          // undo RT (button on RT by me)
+        if (isMyRT) {
+          // undo RT (button on my RT)
           API.untweet(t.id_str, function() {
             ab.rt.turn(false);
             D.del(ab.node.parentNode);
           });
-        } else if (ab.rt.isTweetRTedByMe) {
+        } else if (isTweetRTedByMe) {
+          // undo RT (button on owner tweet or others' RT)
           API.untweet(t.current_user_retweet.id_str, function() {
-            // undo RT (button on RT by others, or owner)
-            ab.rt.isTweetRTedByMe = false;
+            isTweetRTedByMe = false;
             ab.rt.turn(false);
           });
         } else {
-          API.retweet(t.id_str, function(xhr) {
-            // do RT
-            ab.rt.isTweetRTedByMe = true;
-            ab.rt.turn(true);
+          // do RT
+          API.retweet((rt || t).id_str, function(xhr) {
             var data = JSON.parse(xhr.responseText);
             t.current_user_retweet = data;
+            isTweetRTedByMe = true;
+            ab.rt.turn(true);
           });
         }
       }, false);
-
-      if (!isDM && ((t.user.id_str !== my.id_str) || isMyRT) && !isRTtoMe) {
-        // Show RT buttons on tweets without my tweets
-        ab.node.add(ab.rt.node);
-      }
 
       if (isDM) {
         // Delete button for DM
@@ -1624,16 +1721,19 @@
         }, false);
         ab.node.add(ab.del.node);
 
-      } else if (((t.user.id_str === my.id_str) && !isMyRT) || isRTtoMe) {
+      } else if (isMyTweet || isRTtoMe) {
         // Delete button for my tweets
         ab.del.node.addEventListener("click", function() {
-          API.untweet(isRTtoMe ? t.retweeted_status.id_str : t.id_str,
+          API.untweet((rt || t).id_str,
                       function(xhr) {
                         D.del(ab.node.parentNode);
                       });
         }, false);
-
         ab.node.add(ab.del.node);
+
+      } else {
+        // Show RT buttons on tweets without my tweets
+        ab.node.add(ab.rt.node);
       }
 
       return ab.node;
@@ -1647,7 +1747,8 @@
         follow: new Button("follow", "Follow", "Unfollow"),
         block: new Button("block", "Block", "Unblock"),
         spam: new Button("spam", "Spam", "Unspam"),
-        req_follow: new Button("req_follow", "ReqFollow", "UnreqFollow")
+        req_follow: new Button("req_follow", "ReqFollow", "UnreqFollow"),
+        dm: D.ce("button")
       }
 
       D.id("subaction").add(ab.node);
@@ -1747,6 +1848,17 @@
             ab.spam.node
           );
         }
+
+        if (ship.followed_by) {
+          ab.dm.add(D.ct("DM"));
+          ab.dm.addEventListener("click", function() {
+            var status = D.id("status");
+            status.value = "d " + user.screen_name + " " + status.value;
+            status.focus();
+          }, false);
+          ab.node.add(ab.dm);
+        }
+
       }
     },
 
@@ -1831,6 +1943,7 @@
         listsub: D.ce("a"),
         listed: D.ce("a"),
         blocking: D.ce("a"),
+        api: D.ce("button"),
         logout: D.ce("button"),
       };
 
@@ -1878,6 +1991,15 @@
       g.blocking.href = U.ROOT + "blocking";
       g.blocking.add(D.ct("Blocking"));
 
+      g.api.add(D.ct("API rest"));
+      g.api.addEventListener("click", function() {
+        X.get(U.APV + "account/rate_limit_status.json", function(xhr) {
+          var data = JSON.parse(xhr.responseText);
+          data.reset_time = new Date(data.reset_time);
+          alert(O.stringify(data));
+        });
+      }, false);
+
       g.logout.add(D.ct("logout"));
       g.logout.addEventListener("click", function() {
         API.logout(function(xhr) { location.href = U.ROOT; });
@@ -1887,15 +2009,14 @@
         D.ce("li").add(g.home),
         D.ce("li").add(g.profile),
         D.ce("li").add(g.replies),
-        D.ce("li").add(g.inbox),
-        D.ce("li").add(g.sent),
+        D.ce("li").add(g.inbox, D.ct("/"), g.sent),
         D.ce("li").add(g.favorites),
         D.ce("li").add(g.following, D.ct("/"), g.follow_req_out),
         D.ce("li").add(g.followers, D.ct("/"), g.follow_req_in),
-        D.ce("li").add(g.lists),
-        D.ce("li").add(g.listsub),
+        D.ce("li").add(g.lists, D.ct("/"), g.listsub),
         D.ce("li").add(g.listed),
         D.ce("li").add(g.blocking),
+        D.ce("li").add(g.api),
         D.ce("li").add(g.logout)
       );
       D.id("header").add(g.bar);
@@ -1915,7 +2036,8 @@
       };
 
       function tcoUrl() {
-        var urls = t.status.value.match(/https?:\/\/\S+/g);
+        var urls = t.status.value.
+                   match(/https?:\/\/[-\w.!~*'()%@:$,;&=+/?#\[\]]+/g);
         urls && urls.forEach(function(input_url) {
           API.tco(input_url,
                   function(output_url) {
@@ -1983,58 +2105,48 @@
         var mode = dir_is_list | target_is_list;
 
         switch (mode) {
-          case(0): {
-            switch(dir) {
-              case("following"): {
-                API[isAdd ? "follow" : "unfollow"](target, onAPI);
-                break;
-              }
-              case("followers"): {
-                API[isAdd ? "unblock" : "block"](target, onAPI);
-                break;
-              }
-              case("blocking"): {
-                API[isAdd ? "block" : "unblock"](target, onAPI);
-                break;
-              }
-            }
+        case 0:
+          switch (dir) {
+          case "following":
+            API[isAdd ? "follow" : "unfollow"](target, onAPI);
+            break;
+          case "followers":
+            API[isAdd ? "unblock" : "block"](target, onAPI);
+            break;
+          case "blocking":
+            API[isAdd ? "block" : "unblock"](target, onAPI);
             break;
           }
-          case(1): {
-            switch(dir) {
-              case("following/requests"): {
-                API[isAdd ? "requestFollow" : "unrequestFollow"](target, onAPI);
-                break;
-              }
-              default: { // add user to list
-                var myname_slug = dir.split("/");
-                var myname = myname_slug[0];
-                var slug = myname_slug[1];
-                API[isAdd ? "listing" : "unlisting"](
-                  myname, slug, target, onAPI
-                );
-                break;
-              }
-            }
+          break;
+        case 1:
+          switch (dir) {
+          case "following/requests":
+            API[isAdd ? "requestFollow" : "unrequestFollow"](target, onAPI);
+            break;
+          default: // add user to list
+            var myname_slug = dir.split("/");
+            var myname = myname_slug[0];
+            var slug = myname_slug[1];
+            API[isAdd ? "listing" : "unlisting"](
+              myname, slug, target, onAPI
+            );
             break;
           }
-          case(2): {
+          break;
+        case 2:
+          break;
+        case 3:
+          switch (dir) {
+          case "lists/subscriptions":
+            var uname_slug = target.split("/");
+            var uname = uname_slug[0];
+            var slug = uname_slug[1];
+            API[isAdd ? "followList" : "unfollowList"](
+              uname, slug, onAPI
+            );
             break;
           }
-          case(3): {
-            switch(dir) {
-              case("lists/subscriptions"): {
-                var uname_slug = target.split("/");
-                var uname = uname_slug[0];
-                var slug = uname_slug[1];
-                API[isAdd ? "followList" : "unfollowList"](
-                  uname, slug, onAPI
-                );
-                break;
-              }
-            }
-            break;
-          }
+          break;
         }
       }
 
@@ -2185,7 +2297,7 @@
       X.get(url, function(xhr) {
         var list = JSON.parse(xhr.responseText);
 
-        if (mode === void 0) mode = 7;
+        if (typeof mode === "undefined") mode = 7;
         if ((mode & 4) && (list.mode === "private")) mode ^= 4;
 
         mode & 1 && that.changeDesign(list.user);
@@ -2214,9 +2326,9 @@
 
       li.st.add(
         D.ce("dt").add(D.ct("Name")),
-        D.ce("dd").sa("class", "name").add(D.ct(list.name)),
+        D.ce("dd").sa("class", "name").add(D.ct(T.decodeHTML(list.name))),
         D.ce("dt").add(D.ct("Full Name")),
-        D.ce("dd").add(D.ct(list.full_name)),
+        D.ce("dd").add(D.tweetize(list.full_name)),
         D.ce("dt").add(D.ct("Description")),
         D.ce("dd").add(D.tweetize(list.description)),
         D.ce("dt").add(li.members),
@@ -2236,7 +2348,7 @@
     showProfileOutline: function(screen_name, my, mode) {
       var that = this;
 
-      if (mode === void 0) mode = 15;
+      if (typeof mode === "undefined") mode = 15;
 
       function onGet(xhr) {
         var user = JSON.parse(xhr.responseText);
@@ -2265,8 +2377,6 @@
         box: D.ce("dl"),
         icon: D.ce("img"),
         icorg: D.ce("a"),
-        url: D.ce("a"),
-        bio: D.ce("p"),
         tweets: D.ce("a"),
         following: D.ce("a"),
         following_timeline: D.ce("a"),
@@ -2286,13 +2396,6 @@
 
       p.icorg.add(p.icon);
       p.icorg.href = user.profile_image_url.replace("_normal.", ".");
-
-      if (user.url) {
-        p.url.href = user.url;
-        p.url.add(D.ct(user.url));
-      }
-
-      p.bio.add(D.tweetize(user.description));
 
       p.tweets.add(D.ct("Tweets"));
       p.tweets.href = U.ROOT + user.screen_name + "/status";
@@ -2325,18 +2428,18 @@
         D.ce("dt").add(D.ct("Icon")),
         D.ce("dd").add(p.icorg),
         D.ce("dt").add(D.ct("Name")),
-        D.ce("dd").add(D.tweetize(user.name)),
+        D.ce("dd").add(D.ct(T.decodeHTML(user.name))),
         D.ce("dt").add(D.ct("Location")),
-        D.ce("dd").add(D.tweetize(user.location)),
+        D.ce("dd").add(D.ct(T.decodeHTML(user.location))),
         D.ce("dt").add(D.ct("Web")),
-        D.ce("dd").add(p.url),
+        D.ce("dd").add(D.tweetize(user.url)),
         D.ce("dt").add(D.ct("Bio")),
-        D.ce("dd").add(p.bio),
+        D.ce("dd").add(D.tweetize(user.description)),
         D.ce("dt").add(p.tweets),
         D.ce("dd").add(D.ct(user.statuses_count)),
         D.ce("dt").add(p.favorites),
         D.ce("dd").add(D.ct(user.favourites_count)),
-        D.ce("dt").add(p.following).add(D.ct("/")).add(p.following_timeline),
+        D.ce("dt").add(p.following, D.ct("/"), p.following_timeline),
         D.ce("dd").add(D.ct(user.friends_count)),
         D.ce("dt").add(p.followers),
         D.ce("dd").add(D.ct(user.followers_count)),
@@ -2362,23 +2465,24 @@
 
 
   // Check if my Logged-in
-  function main() {
-    X.get(U.APV + "account/verify_credentials.json",
-      function(xhr) {
-        var my = JSON.parse(xhr.responseText);
-        init.initDOM(my);
-        init.structPage();
-        pre.startPage(my);
-      },
-      function(xhr) {
-        location.href = "/login?redirect_after_login=" +
-                        encodeURIComponent(location);
-      }
-    );
-  }
-
-
-  main();
+  X.get(U.APV + "account/verify_credentials.json",
+    function(xhr) {
+      var my = JSON.parse(xhr.responseText);
+      init.initDOM(my);
+      init.structPage();
+      content.showPage(my);
+    },
+    function(xhr) {
+      X.get(U.APV + "account/rate_limit_status.json", function(xhr) {
+        var data = JSON.parse(xhr.responseText);
+        data.reset_time = new Date(data.reset_time);
+        if (data.remaining_hits > 0) {
+          location.href = "/login?redirect_after_login=" +
+                          encodeURIComponent(location.href);
+        } else alert(O.stringify(data));
+      });
+    }
+  );
 
 
 })();
