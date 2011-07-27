@@ -698,6 +698,7 @@
           font-size: 14px;\
         }\
         button {\
+          margin: 0;\
           line-height: 1.3;\
         }\
         dl {\
