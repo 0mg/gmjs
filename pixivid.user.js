@@ -5,10 +5,10 @@
 // ==/UserScript==
 
 (function() {
-  var profsrc = document.evaluate('.//div[@class="extaraNavi"]//' +
+  var profsrc = document.evaluate('.//div[@class="column-header" or @class="extaraNavi"]//' +
     '@href[starts-with(.,"http://www.pixiv.net/stacc/")]',
     document, null, 2, null).stringValue;
-  var menu = document.evaluate('.//ul[@class="person_menu"]', document, null,
+  var menu = document.evaluate('.//ul[@class="user-relation"]', document, null,
     9, null).singleNodeValue;
 
   if (profsrc && menu) {
