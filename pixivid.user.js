@@ -5,7 +5,7 @@
 // ==/UserScript==
 
 (function() {
-  var profsrc = document.evaluate('.//div[@class="column-header"]//' +
+  var profsrc = document.evaluate('.//div[@class="column-header" or @class="extaraNavi"]//' +
     '@href[starts-with(.,"http://www.pixiv.net/stacc/")]',
     document, null, 2, null).stringValue;
   var menu = document.evaluate('.//ul[@class="user-relation"]', document, null,
